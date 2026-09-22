@@ -132,6 +132,14 @@ export function migrate(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- 前置镜头依赖：shot_id 开拍前，dep_shot_id 必须已有可用最佳条（仅限同场景）
+    -- 两个外键均级联：删除任一镜头时，其作为依赖方/被依赖方的关系同步清理
+    CREATE TABLE IF NOT EXISTS shot_deps (
+      shot_id     INTEGER NOT NULL REFERENCES shots(id) ON DELETE CASCADE,
+      dep_shot_id INTEGER NOT NULL REFERENCES shots(id) ON DELETE CASCADE,
+      PRIMARY KEY (shot_id, dep_shot_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_scenes_order   ON scenes (story_time, seq, id);
     CREATE INDEX IF NOT EXISTS idx_snapshots_scene ON snapshots (scene_id);
     CREATE INDEX IF NOT EXISTS idx_changes_scene  ON changes (scene_id);
@@ -139,6 +147,7 @@ export function migrate(): void {
     CREATE INDEX IF NOT EXISTS idx_locks_date     ON schedule_locks (date, ordinal);
     CREATE INDEX IF NOT EXISTS idx_shots_scene    ON shots (scene_id, sort_order, id);
     CREATE INDEX IF NOT EXISTS idx_takes_shot     ON takes (shot_id, take_no);
+    CREATE INDEX IF NOT EXISTS idx_shot_deps_dep  ON shot_deps (dep_shot_id);
   `);
 
   // 旧库升级：为 scenes 增补排程字段（全新库由建表直接包含）
@@ -196,6 +205,9 @@ export function seedIfEmpty(): void {
     );
     const insTake = db.prepare(
       'INSERT INTO takes (shot_id, take_no, usable, is_best, note) VALUES (?, ?, ?, ?, ?)'
+    );
+    const insDep = db.prepare(
+      'INSERT INTO shot_deps (shot_id, dep_shot_id) VALUES (?, ?)'
     );
 
     const lin = insEntity.run('林雪', 'character', '女主角').lastInsertRowid as number;
@@ -270,7 +282,10 @@ export function seedIfEmpty(): void {
     insTake.run(s1sh1, 2, 1, 1, '表演到位，选为最佳条');
     const s1sh2 = insShot.run(s1, '2', '特写', '手持', 1, '怀表特写，注意焦点', 2).lastInsertRowid as number;
     insTake.run(s1sh2, 1, 1, 0, '可用，但导演尚未选定最佳条');
-    insShot.run(s1, '3', '中景', 'B 机 · 轨道', 0, '氛围补拍镜头（非必拍）', 3);
+    const s1sh3 = insShot.run(s1, '3', '中景', 'B 机 · 轨道', 0, '氛围补拍镜头（非必拍）', 3).lastInsertRowid as number;
+    // 演示前置镜头：镜头 2 需在镜头 1 之后拍（已满足）；镜头 3 需在镜头 2 之后拍（未满足 → 被阻塞）
+    insDep.run(s1sh2, s1sh1);
+    insDep.run(s1sh3, s1sh2);
 
     // 医院走廊：两个必拍镜头均已有可用最佳条 → 场景完成
     const s2sh1 = insShot.run(s2, '1', '全景', 'A 机 · 固定', 1, '', 1).lastInsertRowid as number;

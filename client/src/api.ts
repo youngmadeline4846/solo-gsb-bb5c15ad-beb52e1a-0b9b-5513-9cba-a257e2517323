@@ -190,6 +190,16 @@ export interface TakeItem {
   note: string;
 }
 
+/** 前置镜头的就绪情况（satisfied = 该前置已有可用最佳条） */
+export interface ShotPrereq {
+  shotId: number;
+  shotNo: string;
+  required: boolean;
+  status: ShotStatus;
+  reshootReason: ReshootReason | null;
+  satisfied: boolean;
+}
+
 export interface ShotItem {
   id: number;
   sceneId: number;
@@ -201,6 +211,11 @@ export interface ShotItem {
   status: ShotStatus;
   reshootReason: ReshootReason | null;
   bestTakeId: number | null;
+  prereqIds: number[];
+  prereqs: ShotPrereq[];
+  /** 可拍 = 全部前置镜头均已有可用最佳条 */
+  shootable: boolean;
+  blockedBy: ShotPrereq[];
   takes: TakeItem[];
 }
 
@@ -218,6 +233,8 @@ export interface SceneShots {
   reshootShots: number;
   completion: number;
   complete: boolean;
+  /** 下一批可拍队列：可拍且未完成的镜头 id，按「必拍优先、镜头编号自然序」排列 */
+  queue: number[];
   shots: ShotItem[];
 }
 
@@ -234,6 +251,7 @@ export interface ShotListReport {
     requiredDone: number;
     pendingShots: number;
     reshootShots: number;
+    shootableShots: number;
   };
 }
 
@@ -243,6 +261,8 @@ export interface ShotPayload {
   camera: string;
   required: boolean;
   note: string;
+  /** 前置镜头 id 列表（同场景；保存时服务端检测自依赖与循环依赖） */
+  prereqIds: number[];
 }
 
 /* --------------------------------- 请求封装 --------------------------------- */

@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { db, isValidDateISO } from './db.js';
 import { computeContinuity } from './engine.js';
 import { computeSchedule, computeStoryOrder, getScheduleSettings } from './schedule.js';
-import { computeShotList } from './shots.js';
+import { computeShotList, checkShotPrereqs } from './shots.js';
 
 export const api = Router();
 
@@ -577,7 +577,25 @@ function parseShotBody(req: Request) {
     camera: str(req.body?.camera).slice(0, 50),
     required: req.body?.required === false || req.body?.required === 0 ? 0 : 1,
     note: str(req.body?.note).slice(0, 200),
+    prereqIds: parsePrereqIds(req.body?.prereqIds),
   };
+}
+
+/** 解析前置镜头 id 列表：去重、仅保留正整数；省略时视为「不设置前置」（空数组） */
+function parsePrereqIds(raw: unknown): number[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new HttpError(400, 'prereqIds 必须是镜头 id 数组');
+  if (raw.length > 200) throw new HttpError(400, '前置镜头过多（>200）');
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  for (const v of raw) {
+    const id = Number(v);
+    if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, '前置镜头 id 非法');
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
 }
 
 api.post(
@@ -587,12 +605,22 @@ api.post(
     const b = parseShotBody(req);
     const exists = db.prepare('SELECT id FROM scenes WHERE id = ?').get(sceneId);
     if (!exists) throw new HttpError(404, '场景不存在');
-    const maxOrder = db
-      .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM shots WHERE scene_id = ?')
-      .get(sceneId) as { m: number };
-    db.prepare(
-      'INSERT INTO shots (scene_id, shot_no, framing, camera, required, note, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(sceneId, b.shotNo, b.framing, b.camera, b.required, b.note, maxOrder.m + 1);
+    db.transaction(() => {
+      // 先校验前置（存在性/同场景/自依赖），失败即回滚，不产生部分写入
+      const err = checkShotPrereqs(sceneId, null, b.prereqIds);
+      if (err) throw new HttpError(400, err);
+      const maxOrder = db
+        .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM shots WHERE scene_id = ?')
+        .get(sceneId) as { m: number };
+      const shotId = db
+        .prepare(
+          'INSERT INTO shots (scene_id, shot_no, framing, camera, required, note, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )
+        .run(sceneId, b.shotNo, b.framing, b.camera, b.required, b.note, maxOrder.m + 1)
+        .lastInsertRowid as number;
+      const insDep = db.prepare('INSERT INTO shot_deps (shot_id, dep_shot_id) VALUES (?, ?)');
+      for (const depId of b.prereqIds) insDep.run(shotId, depId);
+    })();
     res.status(201).json(computeShotList());
   })
 );
@@ -602,10 +630,22 @@ api.put(
   h((req, res) => {
     const id = idParam(req);
     const b = parseShotBody(req);
-    const r = db
-      .prepare('UPDATE shots SET shot_no = ?, framing = ?, camera = ?, required = ?, note = ? WHERE id = ?')
-      .run(b.shotNo, b.framing, b.camera, b.required, b.note, id);
-    if (r.changes === 0) throw new HttpError(404, '镜头不存在');
+    db.transaction(() => {
+      const shot = db.prepare('SELECT id, scene_id FROM shots WHERE id = ?').get(id) as
+        | { id: number; scene_id: number }
+        | undefined;
+      if (!shot) throw new HttpError(404, '镜头不存在');
+      // 先校验前置（自依赖/任意深度环/同场景），失败即抛错回滚：原镜头与依赖关系不被部分写入
+      const err = checkShotPrereqs(shot.scene_id, id, b.prereqIds);
+      if (err) throw new HttpError(400, err);
+      db.prepare(
+        'UPDATE shots SET shot_no = ?, framing = ?, camera = ?, required = ?, note = ? WHERE id = ?'
+      ).run(b.shotNo, b.framing, b.camera, b.required, b.note, id);
+      // 校验通过后整体替换前置依赖
+      db.prepare('DELETE FROM shot_deps WHERE shot_id = ?').run(id);
+      const insDep = db.prepare('INSERT INTO shot_deps (shot_id, dep_shot_id) VALUES (?, ?)');
+      for (const depId of b.prereqIds) insDep.run(id, depId);
+    })();
     res.json(computeShotList());
   })
 );
@@ -614,6 +654,7 @@ api.delete(
   '/shots/:id',
   h((req, res) => {
     const id = idParam(req);
+    // 外键级联：拍摄条（takes）与前置依赖（shot_deps 两个方向）随镜头一并清理
     const r = db.prepare('DELETE FROM shots WHERE id = ?').run(id);
     if (r.changes === 0) throw new HttpError(404, '镜头不存在');
     res.json(computeShotList());

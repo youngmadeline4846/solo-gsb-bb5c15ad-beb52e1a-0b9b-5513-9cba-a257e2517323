@@ -723,3 +723,109 @@ tr.row-first td {
   border-color: var(--ok);
   background: rgba(63, 206, 139, 0.1);
 }
+
+/* ---------- 前置镜头与可拍队列 ---------- */
+.shot-queue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: rgba(91, 140, 255, 0.08);
+  border: 1px solid rgba(91, 140, 255, 0.4);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+.shot-queue-empty {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--border);
+}
+.shot-queue-label {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.shot-queue-chip {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.shot-queue-chip.shot-queue-required {
+  border-color: rgba(255, 184, 77, 0.6);
+  color: var(--warn);
+}
+
+.prereq-editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.prereq-editor select {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.prereq-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 6px 2px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.prereq-chip .chip-x {
+  padding: 0 6px;
+  font-size: 11px;
+  border-radius: 999px;
+  border: none;
+}
+
+.prereq-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.prereq-state {
+  font-size: 12px;
+  border-radius: 8px;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+}
+.prereq-state-ok {
+  color: var(--ok);
+  border-color: rgba(63, 206, 139, 0.45);
+  background: rgba(63, 206, 139, 0.08);
+}
+.prereq-state-blocked {
+  color: var(--warn);
+  border-color: rgba(255, 184, 77, 0.5);
+  background: rgba(255, 184, 77, 0.08);
+}
+
+.shot-blocked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--warn);
+  background: rgba(255, 184, 77, 0.08);
+  border: 1px dashed rgba(255, 184, 77, 0.5);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.shot-blocked-item {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px 10px;
+}
