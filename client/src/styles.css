@@ -723,3 +723,111 @@ tr.row-first td {
   border-color: var(--ok);
   background: rgba(63, 206, 139, 0.1);
 }
+
+/* ---------- 前置镜头与可拍队列 ---------- */
+.shot-row.shot-filmable:not(.shot-done) {
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+.shot-row.shot-blocked:not(.shot-done) {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+
+.ready-queue {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border: 1px dashed rgba(63, 206, 139, 0.55);
+  border-radius: 10px;
+  background: rgba(63, 206, 139, 0.07);
+}
+.ready-queue-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ok);
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.25;
+  margin-right: 4px;
+}
+.ready-queue-label em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.ready-chip {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(63, 206, 139, 0.6);
+  background: var(--panel-2);
+  color: var(--ok);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ready-chip:hover {
+  background: rgba(63, 206, 139, 0.18);
+}
+.ready-chip-req {
+  border-color: var(--ok);
+}
+
+.prereq-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.prereq-tag {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.prereq-tag-done {
+  color: var(--ok);
+  border-color: rgba(63, 206, 139, 0.5);
+  background: rgba(63, 206, 139, 0.08);
+}
+.prereq-tag-pending {
+  color: var(--warn);
+  border-color: rgba(255, 184, 77, 0.5);
+  background: rgba(255, 184, 77, 0.08);
+}
+
+.blocker-list {
+  margin: 2px 0 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  color: var(--warn);
+}
+
+.prereq-editor {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prereq-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.prereq-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}

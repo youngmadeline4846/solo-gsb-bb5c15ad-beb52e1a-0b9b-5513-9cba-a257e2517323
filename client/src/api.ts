@@ -190,6 +190,22 @@ export interface TakeItem {
   note: string;
 }
 
+/** 单项前置阻塞原因 */
+export interface ShotBlocker {
+  prereqShotId: number;
+  prereqShotNo: string;
+  prereqStatus: ShotStatus;
+  blockedByChain: boolean;
+  message: string;
+}
+
+export interface ReadyQueueItem {
+  id: number;
+  shotNo: string;
+  required: boolean;
+  status: ShotStatus;
+}
+
 export interface ShotItem {
   id: number;
   sceneId: number;
@@ -201,6 +217,12 @@ export interface ShotItem {
   status: ShotStatus;
   reshootReason: ReshootReason | null;
   bestTakeId: number | null;
+  /** 前置镜头 id 列表（同场景内） */
+  prerequisiteShotIds: number[];
+  /** 可拍 = 全部前置镜头均有可用最佳条（无前置即可拍） */
+  filmable: boolean;
+  /** 未满足的前置逐项阻塞原因 */
+  blockers: ShotBlocker[];
   takes: TakeItem[];
 }
 
@@ -216,8 +238,12 @@ export interface SceneShots {
   requiredDone: number;
   pendingShots: number;
   reshootShots: number;
+  /** 可拍且尚未完成的镜头数 */
+  readyShots: number;
   completion: number;
   complete: boolean;
+  /** 下一批可拍镜头（必拍优先、编号自然序） */
+  readyQueue: ReadyQueueItem[];
   shots: ShotItem[];
 }
 
@@ -234,6 +260,7 @@ export interface ShotListReport {
     requiredDone: number;
     pendingShots: number;
     reshootShots: number;
+    readyShots: number;
   };
 }
 
@@ -243,6 +270,8 @@ export interface ShotPayload {
   camera: string;
   required: boolean;
   note: string;
+  /** 前置镜头 id 列表（必须全部为同场景镜头；服务端拒绝自依赖与任意深度环） */
+  prerequisiteShotIds?: number[];
 }
 
 /* --------------------------------- 请求封装 --------------------------------- */

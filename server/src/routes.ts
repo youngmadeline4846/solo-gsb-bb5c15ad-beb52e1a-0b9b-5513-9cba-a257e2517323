@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { db, isValidDateISO } from './db.js';
 import { computeContinuity } from './engine.js';
 import { computeSchedule, computeStoryOrder, getScheduleSettings } from './schedule.js';
-import { computeShotList } from './shots.js';
+import { PrereqValidationError, assertPrereqsValid, computeShotList } from './shots.js';
 
 export const api = Router();
 
@@ -11,7 +11,8 @@ export const api = Router();
 class HttpError extends Error {
   constructor(
     public status: number,
-    message: string
+    message: string,
+    public details?: Record<string, unknown>
   ) {
     super(message);
   }
@@ -44,7 +45,12 @@ const h =
       fn(req, res);
     } catch (e) {
       if (e instanceof HttpError) {
-        res.status(e.status).json({ error: e.message });
+        res
+          .status(e.status)
+          .json(e.details ? { error: e.message, ...e.details } : { error: e.message });
+      } else if (e instanceof PrereqValidationError) {
+        // 前置关系校验失败：返回可按镜头编号定位的闭环路径等结构化信息
+        res.status(400).json({ error: e.message, code: e.code, ...e.details });
       } else {
         console.error(e);
         res.status(500).json({ error: '服务器内部错误' });
@@ -580,19 +586,52 @@ function parseShotBody(req: Request) {
   };
 }
 
+/**
+ * 解析请求中的前置镜头 id 列表（prerequisiteShotIds）。
+ * 去重、必须为正整数；同场景/自依赖/成环校验在事务内由 assertPrereqsValid 完成。
+ */
+function parsePrereqIds(raw: unknown): number[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new HttpError(400, 'prerequisiteShotIds 必须是数组');
+  if (raw.length > 500) throw new HttpError(400, '前置镜头数量过多（>500）');
+  const ids: number[] = [];
+  for (const v of raw) {
+    const n = num(v, NaN);
+    if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, '前置镜头 id 非法');
+    ids.push(n);
+  }
+  return [...new Set(ids)].sort((a, b) => a - b);
+}
+
+/** 整体替换某镜头的前置关系（调用方需保证已在事务内且先通过 assertPrereqsValid） */
+function replaceShotPrereqs(shotId: number, prereqIds: number[]): void {
+  db.prepare('DELETE FROM shot_prereqs WHERE shot_id = ?').run(shotId);
+  const ins = db.prepare('INSERT INTO shot_prereqs (shot_id, prereq_shot_id) VALUES (?, ?)');
+  for (const pid of prereqIds) ins.run(shotId, pid);
+}
+
 api.post(
   '/scenes/:id/shots',
   h((req, res) => {
     const sceneId = idParam(req);
     const b = parseShotBody(req);
-    const exists = db.prepare('SELECT id FROM scenes WHERE id = ?').get(sceneId);
-    if (!exists) throw new HttpError(404, '场景不存在');
-    const maxOrder = db
-      .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM shots WHERE scene_id = ?')
-      .get(sceneId) as { m: number };
-    db.prepare(
-      'INSERT INTO shots (scene_id, shot_no, framing, camera, required, note, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(sceneId, b.shotNo, b.framing, b.camera, b.required, b.note, maxOrder.m + 1);
+    const prereqIds = parsePrereqIds(req.body?.prerequisiteShotIds);
+    // 整个创建+前置写入在同一事务：校验失败（含环）时镜头本身也不会留下
+    db.transaction(() => {
+      const exists = db.prepare('SELECT id FROM scenes WHERE id = ?').get(sceneId);
+      if (!exists) throw new HttpError(404, '场景不存在');
+      const maxOrder = db
+        .prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM shots WHERE scene_id = ?')
+        .get(sceneId) as { m: number };
+      const id = db
+        .prepare(
+          'INSERT INTO shots (scene_id, shot_no, framing, camera, required, note, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        )
+        .run(sceneId, b.shotNo, b.framing, b.camera, b.required, b.note, maxOrder.m + 1)
+        .lastInsertRowid as number;
+      assertPrereqsValid(id, prereqIds);
+      replaceShotPrereqs(id, prereqIds);
+    })();
     res.status(201).json(computeShotList());
   })
 );
@@ -602,10 +641,19 @@ api.put(
   h((req, res) => {
     const id = idParam(req);
     const b = parseShotBody(req);
-    const r = db
-      .prepare('UPDATE shots SET shot_no = ?, framing = ?, camera = ?, required = ?, note = ? WHERE id = ?')
-      .run(b.shotNo, b.framing, b.camera, b.required, b.note, id);
-    if (r.changes === 0) throw new HttpError(404, '镜头不存在');
+    const hasPrereqField = req.body && Object.prototype.hasOwnProperty.call(req.body, 'prerequisiteShotIds');
+    const prereqIds = hasPrereqField ? parsePrereqIds(req.body.prerequisiteShotIds) : null;
+    // 校验与写入同一事务：自依赖/环被拒绝时，镜头字段与旧前置关系都不会被部分写入
+    db.transaction(() => {
+      const r = db
+        .prepare('UPDATE shots SET shot_no = ?, framing = ?, camera = ?, required = ?, note = ? WHERE id = ?')
+        .run(b.shotNo, b.framing, b.camera, b.required, b.note, id);
+      if (r.changes === 0) throw new HttpError(404, '镜头不存在');
+      if (prereqIds !== null) {
+        assertPrereqsValid(id, prereqIds);
+        replaceShotPrereqs(id, prereqIds);
+      }
+    })();
     res.json(computeShotList());
   })
 );
@@ -614,8 +662,12 @@ api.delete(
   '/shots/:id',
   h((req, res) => {
     const id = idParam(req);
-    const r = db.prepare('DELETE FROM shots WHERE id = ?').run(id);
-    if (r.changes === 0) throw new HttpError(404, '镜头不存在');
+    db.transaction(() => {
+      const r = db.prepare('DELETE FROM shots WHERE id = ?').run(id);
+      if (r.changes === 0) throw new HttpError(404, '镜头不存在');
+      // 同步清理依赖（出边随 shots 外键级联；入边依赖本表外键级联，这里再显式清理一次双保险）
+      db.prepare('DELETE FROM shot_prereqs WHERE shot_id = ? OR prereq_shot_id = ?').run(id, id);
+    })();
     res.json(computeShotList());
   })
 );
